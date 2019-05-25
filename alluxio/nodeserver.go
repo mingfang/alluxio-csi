@@ -2,12 +2,12 @@ package alluxio
 
 import (
     "fmt"
-    "log"
     "os"
     "os/exec"
     "strings"
 
     "github.com/container-storage-interface/spec/lib/go/csi"
+    "github.com/golang/glog"
     "github.com/kubernetes-csi/drivers/pkg/csi-common"
     "golang.org/x/net/context"
     "google.golang.org/grpc/codes"
@@ -23,11 +23,9 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
     targetPath := req.GetTargetPath()
 
     notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-    log.Println("err:", err)
     if err != nil {
         if os.IsNotExist(err) {
             if err := os.MkdirAll(targetPath, 0750); err != nil {
-                log.Println("MkdirAll", "err:", err)
                 return nil, status.Error(codes.Internal, err.Error())
             }
             notMnt = true
@@ -51,9 +49,14 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
     command := exec.Command("/opt/alluxio/integration/fuse/bin/alluxio-fuse",
         "mount", "-o", "allow_other", targetPath, "/",
     )
-    alluxioJavaOpts := fmt.Sprintf("ALLUXIO_JAVA_OPTS=-Dalluxio.master.hostname=%s -Dalluxio.master.port=%s", masterHost, masterPort)
+    alluxioJavaOpts := "ALLUXIO_JAVA_OPTS=" + strings.Join([]string{
+        fmt.Sprintf("-Dalluxio.master.hostname=%s", masterHost),
+        fmt.Sprintf("-Dalluxio.master.port=%s", masterPort),
+        fmt.Sprintf("-Dalluxio.user.app.id=%s", req.GetVolumeId()),
+    }, " ")
     command.Env = append(os.Environ(), alluxioJavaOpts)
-    err = command.Run()
+    stdoutStderr, err := command.CombinedOutput()
+    glog.V(4).Infoln(string(stdoutStderr))
     if err != nil {
         if os.IsPermission(err) {
             return nil, status.Error(codes.PermissionDenied, err.Error())
@@ -69,27 +72,19 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
     targetPath := req.GetTargetPath()
-    notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-
-    if err != nil {
-        if os.IsNotExist(err) {
-            return nil, status.Error(codes.NotFound, "Targetpath not found")
-        } else {
-            return nil, status.Error(codes.Internal, err.Error())
-        }
-    }
-    if notMnt {
-        return nil, status.Error(codes.NotFound, "Volume not mounted")
-    }
 
     command := exec.Command("/opt/alluxio/integration/fuse/bin/alluxio-fuse",
         "unmount", targetPath,
     )
-    err = command.Run()
+    stdoutStderr, err := command.CombinedOutput()
+    if err != nil {
+        glog.V(3).Infoln(err)
+    }
+    glog.V(4).Infoln(string(stdoutStderr))
 
     err = mount.CleanupMountPoint(req.GetTargetPath(), mount.New(""), false)
     if err != nil {
-        return nil, status.Error(codes.Internal, err.Error())
+        glog.V(3).Infoln(err)
     }
 
     return &csi.NodeUnpublishVolumeResponse{}, nil
