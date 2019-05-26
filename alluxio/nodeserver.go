@@ -16,6 +16,7 @@ import (
 )
 
 type nodeServer struct {
+    nodeId string
     *csicommon.DefaultNodeServer
 }
 
@@ -38,23 +39,41 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
         return &csi.NodePublishVolumeResponse{}, nil
     }
 
-    mo := req.GetVolumeCapability().GetMount().GetMountFlags()
+    mountOptions := req.GetVolumeCapability().GetMount().GetMountFlags()
     if req.GetReadonly() {
-        mo = append(mo, "ro")
+        mountOptions = append(mountOptions, "ro")
     }
+
+    /*
+       https://docs.alluxio.io/os/user/edge/en/api/POSIX-API.html
+       https://github.com/Alluxio/alluxio/blob/master/integration/fuse/bin/alluxio-fuse
+    */
 
     masterHost := req.GetVolumeContext()["alluxio.master.hostname"]
     masterPort := req.GetVolumeContext()["alluxio.master.port"]
+    javaOptions := req.GetVolumeContext()["java_options"]
 
-    command := exec.Command("/opt/alluxio/integration/fuse/bin/alluxio-fuse",
-        "mount", "-o", "allow_other", targetPath, "/",
-    )
+    alluxioPath := req.GetVolumeContext()["alluxio_path"]
+    if alluxioPath == "" {
+        alluxioPath = "/"
+    }
+
+    args := []string{"mount"}
+    if len(mountOptions) > 0 {
+        args = append(args, "-o", strings.Join(mountOptions, ","))
+    }
+    args = append(args, targetPath, alluxioPath)
+    command := exec.Command("/opt/alluxio/integration/fuse/bin/alluxio-fuse", args...)
     alluxioJavaOpts := "ALLUXIO_JAVA_OPTS=" + strings.Join([]string{
         fmt.Sprintf("-Dalluxio.master.hostname=%s", masterHost),
         fmt.Sprintf("-Dalluxio.master.port=%s", masterPort),
         fmt.Sprintf("-Dalluxio.user.app.id=%s", req.GetVolumeId()),
+        fmt.Sprintf("-Dalluxio.locality.node=%s", ns.nodeId),
+        javaOptions,
     }, " ")
     command.Env = append(os.Environ(), alluxioJavaOpts)
+
+    glog.V(4).Infoln(command)
     stdoutStderr, err := command.CombinedOutput()
     glog.V(4).Infoln(string(stdoutStderr))
     if err != nil {

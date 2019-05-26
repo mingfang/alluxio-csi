@@ -7,15 +7,14 @@ import (
     csicommon "github.com/kubernetes-csi/drivers/pkg/csi-common"
 )
 
-
 const (
     driverName = "alluxio"
-    version = "1.0.0"
+    version    = "1.0.0"
 )
 
 type driver struct {
-    csiDriver *csicommon.CSIDriver
-    endpoint  string
+    csiDriver        *csicommon.CSIDriver
+    nodeId, endpoint string
 }
 
 func NewDriver(nodeID, endpoint string) *driver {
@@ -25,7 +24,8 @@ func NewDriver(nodeID, endpoint string) *driver {
     csiDriver.AddVolumeCapabilityAccessModes([]csi.VolumeCapability_AccessMode_Mode{csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER})
 
     return &driver{
-        endpoint: endpoint,
+        nodeId:    nodeID,
+        endpoint:  endpoint,
         csiDriver: csiDriver,
     }
 }
@@ -37,6 +37,7 @@ func (d *driver) newControllerServer() *controllerServer {
 }
 func (d *driver) newNodeServer() *nodeServer {
     return &nodeServer{
+        nodeId: d.nodeId,
         DefaultNodeServer: csicommon.NewDefaultNodeServer(d.csiDriver),
     }
 }
