@@ -1,0 +1,7 @@
+#!/bin/bash
+
+IMAGE=alluxio-csi
+
+docker build --pull --target dev --tag "${IMAGE}:dev" $@ .
+docker run --rm -v `pwd`:/go/src/github.com/mingfang/alluxio-csi -w /go/src/github.com/mingfang/alluxio-csi -it "${IMAGE}:dev" bash
+
