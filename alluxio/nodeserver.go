@@ -53,6 +53,21 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
     masterPort := req.GetVolumeContext()["alluxio.master.port"]
     javaOptions := req.GetVolumeContext()["java_options"]
 
+    /*
+        short-circuit and locality
+        https://docs.alluxio.io/os/user/edge/en/advanced/Tiered-Locality.html
+     */
+    var shortCircuitOptions string
+    domainSocket := req.GetVolumeContext()["alluxio.worker.data.server.domain.socket.address"]
+    if domainSocket != "" {
+        shortCircuitOptions = strings.Join([]string{
+            fmt.Sprintf("-Dalluxio.worker.data.server.domain.socket.address=%s", domainSocket),
+            fmt.Sprintf("-Dalluxio.locality.node=%s", ns.nodeId),
+            "-Dalluxio.worker.data.server.domain.socket.as.uuid=true",
+            "-Dalluxio.user.short.circuit.enabled=true",
+        }, " ")
+    }
+
     alluxioPath := req.GetVolumeContext()["alluxio_path"]
     if alluxioPath == "" {
         alluxioPath = "/"
@@ -68,7 +83,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
         fmt.Sprintf("-Dalluxio.master.hostname=%s", masterHost),
         fmt.Sprintf("-Dalluxio.master.port=%s", masterPort),
         fmt.Sprintf("-Dalluxio.user.app.id=%s", req.GetVolumeId()),
-        fmt.Sprintf("-Dalluxio.locality.node=%s", ns.nodeId),
+        shortCircuitOptions,
         javaOptions,
     }, " ")
     command.Env = append(os.Environ(), alluxioJavaOpts)
